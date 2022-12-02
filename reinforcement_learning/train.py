@@ -1,13 +1,9 @@
 import os
-import time
-import pickle
+
 import numpy as np
+import torch as th
 
-import tensorflow as tf
-import tensorflow.contrib.layers as layers
-
-from algo import tf_util as U
-from algo.trainer import MADDPGAgentTrainer
+from algo import Trainer
 from env import AirSimDroneEnv
 
 root = "/home/lydia/Documents/AirSim/"
@@ -48,136 +44,93 @@ def rewrite_setting_file(num_agents):
         print('Writing successfully!\n')
 
 
-def actor(inputs, num_outputs, scope, reuse=False, num_units=64, rnn_cell=None):
-    # This model takes as input an observation and returns values of all actions
-    with tf.variable_scope(scope, reuse=reuse):
-        out = inputs
-        out = layers.fully_connected(out, num_outputs=num_units, activation_fn=tf.nn.relu)
-        out = layers.fully_connected(out, num_outputs=num_units, activation_fn=tf.nn.relu)
-        out = layers.fully_connected(out, num_outputs=num_outputs, activation_fn=None)
-        return out
-
-
-def critic(inputs, num_outputs, scope, reuse=False, num_units=64, rnn_cell=None):
-    # This model takes as input an observation and returns values of all actions
-    with tf.variable_scope(scope, reuse=reuse):
-        out = inputs
-        out = layers.fully_connected(out, num_outputs=num_units, activation_fn=tf.nn.relu)
-        out = layers.fully_connected(out, num_outputs=num_units, activation_fn=tf.nn.relu)
-        out = layers.fully_connected(out, num_outputs=num_outputs, activation_fn=None)
-        return out
-
-
-def get_trainers(env, args):
-    obs_shape_n = [env.observation_space.shape for _ in range(env.n)]
-    act_shape_n = [env.action_space for _ in range(env.n)]
-    trainers = []
-    for i in range(env.n):
-        trainers.append(
-            MADDPGAgentTrainer(
-                name="agent_%d" % i,
-                actor=actor,
-                critic=critic,
-                obs_shape_n=obs_shape_n,
-                act_space_n=act_shape_n,
-                agent_index=i,
-                args=args,
-                local_q_func=args.good_policy == 'ddpg')
-        )
-    return trainers
+def make_exp_id(args):
+    return 'exp_{}_{}_{}_{}_{}_{}_{}'.format(args.exp_name, args.num_agents, args.seed,
+                                             args.a_lr, args.c_lr, args.batch_size, args.gamma)
 
 
 def train(args):
-    with U.single_threaded_session():
-        # Create environment
-        env = AirSimDroneEnv(
-            ip_address="127.0.0.1",
-            step_length=0.75,
-            image_shape=(84, 84, 1),
-            num_agents=args.num_agents,
-        )
-        # Create agent trainers
-        trainers = get_trainers(env, args)
-        print('Using good policy {} and adv policy {}'.format(args.good_policy, args.adv_policy))
-        # Initialize
-        U.initialize()
-        if args.restore:
-            print('Loading previous state...')
-            U.load_state(args.load_dir or args.save_dir)
-        # Parameter saver
-        saver = tf.train.Saver()
-        # Record
-        rewards, losses = [], []  # sum of rewards for all agents
-        episode_step = 0
-        train_step = 0
-        episode = 0
+    # Seed
+    np.random.seed(args.seed)
+    th.manual_seed(args.seed)
+    # Create environment
+    env = AirSimDroneEnv(ip_address="192.168.1.102",
+                         step_length=0.75,
+                         image_shape=(5, 144, 256),
+                         num_agents=args.num_agents)
+    # Create MARL trainer
+    trainer = Trainer(env.n,
+                      env.image_shape,
+                      env.action_space.shape[0],
+                      args,
+                      folder=make_exp_id(args_))
+    # Load previous param
+    if args.load_dir is not None:
+        trainer.load_model(load_path=args.load_dir)
 
-        print('Starting iterations...')
-        t_start = time.time()
+    # Start iterations
+    step, episode, reward_record = 0, 0, []
+    while True:
         obs_n = env.reset()
-        while True:
-            # get action
-            # action_n = [agent.action(obs) for agent, obs in zip(trainers, obs_n)]
-            action_n = [(np.random.random(env.action_space.shape[0])*2 - 1) for _ in trainers]
-            print(train_step, action_n)
-            # environment step
-            new_obs_n, rew_n, done_n, _ = env.step(action_n)
-            episode_step += 1
-            train_step += 1
-            terminal = episode_step >= args.max_episode_len
-            # collect experience
-            for i, agent in enumerate(trainers):
-                agent.experience(obs_n[i], action_n[i], rew_n[i], new_obs_n[i], done_n[i])
-            obs_n = new_obs_n
-            rewards.append([sum(rew_n), ] + rew_n)
-            # update all trainers
-            tmp = []
-            for agent in trainers:
-                loss = agent.update(trainers, train_step)
-                if loss is not None:
-                    tmp.append(loss)
-            losses.append(tmp)
-            # reset environment
-            if any(done_n) or terminal:
-                print(episode_step)
-                obs_n = env.reset()
-                episode_step = 0
-                episode += 1
-                if episode % args.save_rate == 0:  # save model, display training output
-                    U.save_state(args.save_dir, saver=saver)
-                    end = time.time()
-                    mean_reward = np.array(rewards).mean(axis=0)
-                    mean_loss = np.array(losses).mean(axis=0)
-                    print("step: {}, episode: {}".format(train_step, episode))
-                    print('mean reward: ', [round(v, 3) for v in mean_reward])
-                    print('mean loss: ', [round(v, 3) for v in mean_loss])
-                    print('time: ', round(end - t_start, 3))
-                    t_start = end
-                    rewards, losses = [], []
-                if episode > args.num_episodes:  # end condition
-                    break
+        for i in range(args.max_episode_len):
+            act_n = trainer.act(obs_n, step >= args.learning_start)
+            print(act_n)
+            next_obs_n, rew_n, done_n, _ = env.step(act_n)
+            print(rew_n,  done_n)
+            if i == args.max_episode_len - 1:
+                next_obs_n = None
+
+            step += 1
+            reward_record.append(rew_n)
+            trainer.add_experience(obs_n, act_n, next_obs_n, rew_n, done_n)
+            obs_n = next_obs_n
+
+            if step >= args.learning_start:
+                trainer.update(step)
+
+            if sum(done_n) > 0:
+                break
+
+        episode += 1
+        if episode % args.save_rate == 0:
+            trainer.save_model()
+
+            rew_dict = {'agent_{}'.format(i + 1): v for i, v in enumerate(np.mean(reward_record, axis=0))}
+            rew_dict['total'] = np.sum(reward_record, axis=1).mean()
+            trainer.scalars("Reward", rew_dict, episode)
+            trainer.scalars("Param", {'var': trainer.var}, episode)
+            reward_record = []
+            print('Episode:', episode, rew_dict)
+
+        if episode >= args.num_episodes:
+            break
+
+    # End environment
+    env.close()
 
 
 if __name__ == '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser("Reinforcement Learning experiments for multiagent environments")
+    parser = argparse.ArgumentParser("Reinforcement Learning experiments for multi-agent environments")
     # Environment
     parser.add_argument("--num-agents", type=int, default=3, help="number of the agent (drone or car)")
     parser.add_argument("--max-episode-len", type=int, default=1000, help="maximum episode length")
     parser.add_argument("--num-episodes", type=int, default=60000, help="number of episodes")
+    parser.add_argument('--memory-length', default=int(1e6), type=int, help='number of experience replay pool')
     parser.add_argument("--learning-start", type=int, default=1000, help="start updating after this number of step")
     parser.add_argument("--good-policy", type=str, default="algo", help="policy for good agents")
     parser.add_argument("--adv-policy", type=str, default="algo", help="policy of adversaries")
     # Core training parameters
-    parser.add_argument("--lr", type=float, default=1e-3, help="learning rate for Adam optimizer")
+    parser.add_argument("--a-lr", type=float, default=1e-4, help="learning rate for Actor Adam optimizer")
+    parser.add_argument("--c-lr", type=float, default=1e-3, help="learning rate for Critic Adam optimizer")
     parser.add_argument("--gamma", type=float, default=0.95, help="discount factor")
+    parser.add_argument('--tau', default=0.001, type=float, help='rate of soft update')
     parser.add_argument("--batch-size", type=int, default=32, help="number of episodes to optimize at the same time")
     parser.add_argument("--num-units", type=int, default=128, help="number of units in the mlp")
     # Checkpointing
-    parser.add_argument("--exp-name", type=str, default=None, help="name of the experiment")
-    parser.add_argument("--save-dir", type=str, default="./trained/policy/",
-                        help="directory in which training state and model should be saved")
+    parser.add_argument("--exp-name", type=str, default='train', help="name of the experiment")
+    parser.add_argument("--seed", type=int, default=1234, help="name of the experiment")
     parser.add_argument("--save-rate", type=int, default=1000,
                         help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default=None,
@@ -186,11 +139,13 @@ if __name__ == '__main__':
     parser.add_argument("--restore", action="store_true", default=False)
     parser.add_argument("--plots-dir", type=str, default="./trained/curve/",
                         help="directory where plot data is saved")
+
     args_ = parser.parse_args()
     if input_format(keyword='Rewrite the setting.json of Unreal project',
                     y_desc='The setting file is rewritten',
                     n_desc='The setting file is not changed'):
         rewrite_setting_file(num_agents=args_.num_agents)
+
     if input_format(keyword='The Unreal client has been opened',
                     y_desc='Start the training process',
                     n_desc='Not ready yet!'):

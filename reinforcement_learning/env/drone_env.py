@@ -20,15 +20,21 @@ class AirSimDroneEnv(AirSimEnv):
         self.fixed_points = None
 
     def reset(self):
-        self.fixed_points = [[100.0, 100.0, 25.0],
-                             [90.0, 100.0, 25.0],
-                             [80.0, 100.0, 25.0]]
+        self.fixed_points = [[100.0, 100.0, -50.0],
+                             [90.0, 100.0, -50.0],
+                             [80.0, 100.0, -50.0]]
         client = self.client
         client.reset()
         for i in range(self.n):
             uav_name = 'Drone{}'.format(i + 1)
             client.enableApiControl(True, uav_name)
             client.armDisarm(True, uav_name)
+
+            p = self.fixed_points[i]
+            if i != self.n - 1:
+                client.moveToPositionAsync(p[0]-60, p[1], p[2], 100, vehicle_name=uav_name)
+            else:
+                client.moveToPositionAsync(p[0]-60, p[1], p[2], 100, vehicle_name=uav_name).join()
         print('Reset is completed!')
         return self.__get_obs()
 
@@ -54,20 +60,19 @@ class AirSimDroneEnv(AirSimEnv):
         return self.__get_obs(), rewards, dones, {}
 
     def __get_obs(self):
-        [width, height, channel] = self.image_shape
-        images = []
+        obs_n = []
         for i in range(self.n):
             uav_name = 'Drone{}'.format(i + 1)
             responses = self.client.simGetImages(self.image_requests, vehicle_name=uav_name)
-            img1d = np.array(responses[0].image_data_float, dtype=np.float)
-            img1d = 255 / np.maximum(np.ones(img1d.size), img1d)
-            img2d = np.reshape(img1d, (responses[0].height, responses[0].width))
-            image = Image.fromarray(img2d)
-            im_final = np.array(image.resize((width, height)).convert("L"))
-            image = im_final.reshape([width, height, channel])
-            image = image.reshape([1, -1])
-            images.append(image)
-        return np.concatenate(images)
+            images = []
+            for response in responses:
+                img1d = np.array(response.image_data_float, dtype=np.float)
+                img1d = 255 / np.maximum(np.ones(img1d.size), img1d)
+                img2d = np.reshape(img1d, (response.height, response.width))
+                image = Image.fromarray(img2d).convert("L")
+                images.append(image)
+            obs_n.append(np.stack(images))
+        return np.stack(obs_n)
 
     def __compute_reward(self):
         client = self.client
@@ -88,10 +93,8 @@ class AirSimDroneEnv(AirSimEnv):
             else:
                 reward = -100
             rewards.append(reward)
-            dones.append(collision)
-        if any(dones):
-            print('Reward:', rewards, dones)
-        return rewards, dones
+            dones.append(int(collision))
+        return np.array(rewards), np.array(dones)
 
     def close(self):
         client = self.client

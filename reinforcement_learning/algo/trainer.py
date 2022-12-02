@@ -1,185 +1,194 @@
+from copy import deepcopy
+
 import numpy as np
-import tensorflow as tf
-from . import tf_util as U
-from .distributions import make_pdtype
-from .replay_buffer import ReplayBuffer
+import torch as th
+from torch.optim import Adam
+import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
+
+from .memory import ReplayMemory, Experience
+from .network import Critic, Actor
+from .misc import get_folder, soft_update, FloatTensor, ByteTensor
+from .visual import NetLooker, net_visual
 
 
-class AgentTrainer(object):
-    def __init__(self, name, model, obs_shape, act_space, args):
-        raise NotImplemented()
+class Trainer:
+    def __init__(self, n_agents, dim_obs, dim_act, args, folder=None):
+        self.n_agents = n_agents
+        self.n_states = dim_obs
+        self.n_actions = dim_act
+        self.batch_size = args.batch_size
+        self.gamma = args.gamma
+        self.tau = args.tau
+        self.var = 1.0
 
-    def action(self, obs):
-        raise NotImplemented()
+        self.memory = ReplayMemory(args.memory_length)
 
-    def process_experience(self, obs, act, rew, new_obs, done, terminal):
-        raise NotImplemented()
+        self.actors = [Actor(dim_obs, dim_act) for _ in range(n_agents)]
+        self.critics = [Critic(n_agents, dim_obs, dim_act) for _ in range(n_agents)]
+        self.actors_target = deepcopy(self.actors)
+        self.critics_target = deepcopy(self.critics)
+        self.critic_optimizer = [Adam(x.parameters(), lr=args.c_lr) for x in self.critics]
+        self.actor_optimizer = [Adam(x.parameters(), lr=args.a_lr) for x in self.actors]
 
-    def preupdate(self):
-        raise NotImplemented()
+        self.c_losses, self.a_losses = [], []
+        self.__addiction(n_agents, dim_obs, dim_act, folder)
 
-    def update(self, agents, t):
-        raise NotImplemented()
+    def __addiction(self, n_agents, dim_obs, dim_act, folder):
+        self.writer = None
+        self.actor_looker = None
+        self.critic_looker = None
 
+        if folder is None:
+            return
 
-def discount_with_dones(rewards, dones, gamma):
-    discounted = []
-    r = 0
-    for reward, done in zip(rewards[::-1], dones[::-1]):
-        r = reward + gamma * r
-        r = r * (1. - done)
-        discounted.append(r)
-    return discounted[::-1]
+        # 数据记录（计算图、logs和网络参数）的保存文件路径
+        self.path = get_folder(folder,
+                               has_graph=True,
+                               has_log=True,
+                               has_model=True,
+                               allow_exist=True)
+        if self.path['log_path'] is not None:
+            self.writer = SummaryWriter(self.path['log_path'])
+        if self.path['graph_path'] is not None:
+            print('Draw the net of Actor and Critic!')
+            net_visual([(1, ) + dim_obs],
+                       self.actors[0],
+                       filename='actor',
+                       directory=self.path['graph_path'],
+                       format='png',
+                       cleanup=True)
+            self.actor_looker = NetLooker(net=self.actors[0],
+                                          name='actor',
+                                          is_look=False,
+                                          root=self.path['graph_path'])
+            net_visual([(n_agents, 1,) + dim_obs, (n_agents, 1, dim_act)],
+                       self.critics[0],
+                       filename='critic',
+                       directory=self.path['graph_path'],
+                       format='png',
+                       cleanup=True)
+            self.critic_looker = NetLooker(net=self.critics[0],
+                                           name='critic',
+                                           is_look=False)
 
+    def add_experience(self, obs_n, act_n, next_obs_n, rew_n, done_n):
+        self.memory.push(obs_n, act_n, next_obs_n, rew_n, done_n)
 
-def make_update_exp(vals, target_vals):
-    polyak = 1.0 - 1e-2
-    expression = []
-    for var, var_target in zip(sorted(vals, key=lambda v: v.name), sorted(target_vals, key=lambda v: v.name)):
-        expression.append(var_target.assign(polyak * var_target + (1.0 - polyak) * var))
-    expression = tf.group(*expression)
-    return U.function([], [], updates=[expression])
+    def act(self, obs_n, var_decay=False):
+        n_actions = self.n_actions
+        obs_n = th.from_numpy(obs_n).type(FloatTensor)
+        act_n = th.zeros(self.n_agents, n_actions)
 
+        for i in range(self.n_agents):
+            sb = obs_n[i, :].detach()
+            act = self.actors[i](sb.unsqueeze(0)).squeeze()
+            act += th.from_numpy(np.random.randn(n_actions) * self.var).type(FloatTensor)
+            act = th.clamp(act, -1.0, 1.0)
+            act_n[i, :] = act
+            if var_decay and self.var > 0.05:
+                self.var *= 0.999998
+        return act_n.data.cpu().numpy()
 
-def p_train(make_obs_ph_n, act_space_n, p_index, p_func, q_func, optimizer, grad_norm_clipping=None, local_q_func=False,
-            num_units=64, scope="trainer", reuse=None):
-    with tf.variable_scope(scope, reuse=reuse):
-        # create distributions
-        act_pdtype_n = [make_pdtype(act_space) for act_space in act_space_n]
-        # set up placeholders
-        obs_ph_n = make_obs_ph_n
-        act_ph_n = [act_pdtype_n[i].sample_placeholder([None], name="action" + str(i)) for i in range(len(act_space_n))]
-        p_input = obs_ph_n[p_index]
-        p = p_func(p_input, int(act_pdtype_n[p_index].param_shape()[0]), scope="p_func", num_units=num_units)
-        p_func_vars = U.scope_vars(U.absolute_scope_name("p_func"))
-        # wrap parameters in distribution
-        act_pd = act_pdtype_n[p_index].pdfromflat(p)
-        act_sample = act_pd.sample()
-        p_reg = tf.reduce_mean(tf.square(act_pd.flatparam()))
-        act_input_n = act_ph_n + []
-        act_input_n[p_index] = act_pd.sample()
-        q_input = tf.concat(obs_ph_n + act_input_n, 1)
-        if local_q_func:
-            q_input = tf.concat([obs_ph_n[p_index], act_input_n[p_index]], 1)
-        q = q_func(q_input, 1, scope="q_func", reuse=True, num_units=num_units)[:, 0]
-        pg_loss = -tf.reduce_mean(q)
-        loss = pg_loss + p_reg * 1e-3
-        optimize_expr = U.minimize_and_clip(optimizer, loss, p_func_vars, grad_norm_clipping)
-        # Create callable functions
-        train = U.function(inputs=obs_ph_n + act_ph_n, outputs=loss, updates=[optimize_expr])
-        act = U.function(inputs=[obs_ph_n[p_index]], outputs=act_sample)
-        p_values = U.function([obs_ph_n[p_index]], p)
-        # target network
-        target_p = p_func(p_input,
-                          int(act_pdtype_n[p_index].param_shape()[0]),
-                          scope="target_p_func",
-                          num_units=num_units)
-        target_p_func_vars = U.scope_vars(U.absolute_scope_name("target_p_func"))
-        update_target_p = make_update_exp(p_func_vars, target_p_func_vars)
-        target_act_sample = act_pdtype_n[p_index].pdfromflat(target_p).sample()
-        target_act = U.function(inputs=[obs_ph_n[p_index]], outputs=target_act_sample)
-        return act, train, update_target_p, {'p_values': p_values, 'target_act': target_act}
+    def update(self, step):
+        c_loss, a_loss = [], []
+        for agent in range(self.n_agents):
+            transitions = self.memory.sample(self.batch_size)
+            batch = Experience(*zip(*transitions))
 
+            non_final_mask = ByteTensor(list(map(lambda s: s is not None, batch.next_states)))
+            state_batch = th.stack(batch.states).type(FloatTensor)  # state_batch: batch_size x n_agents x dim_obs
+            action_batch = th.stack(batch.actions).type(FloatTensor)
+            reward_batch = th.stack(batch.rewards).type(FloatTensor)
+            non_final_next_states = th.stack(
+                [s for s in batch.next_states if s is not None]
+            ).type(FloatTensor)  # : (batch_size_non_final) x n_agents x dim_obs
 
-def q_train(make_obs_ph_n, act_space_n, q_index, q_func, optimizer, grad_norm_clipping=None, local_q_func=False,
-            scope="trainer", reuse=None, num_units=64):
-    with tf.variable_scope(scope, reuse=reuse):
-        # create distributions
-        act_pdtype_n = [make_pdtype(act_space) for act_space in act_space_n]
-        # set up placeholders
-        obs_ph_n = make_obs_ph_n
-        act_ph_n = [act_pdtype_n[i].sample_placeholder([None], name="action" + str(i)) for i in range(len(act_space_n))]
-        target_ph = tf.placeholder(tf.float32, [None], name="target")
-        q_input = tf.concat(obs_ph_n + act_ph_n, 1)
-        if local_q_func:
-            q_input = tf.concat([obs_ph_n[q_index], act_ph_n[q_index]], 1)
-        q = q_func(q_input, 1, scope="q_func", num_units=num_units)[:, 0]
-        q_func_vars = U.scope_vars(U.absolute_scope_name("q_func"))
-        q_loss = tf.reduce_mean(tf.square(q - target_ph))
-        # viscosity solution to Bellman differential equation in place of an initial condition
-        q_reg = tf.reduce_mean(tf.square(q))
-        loss = q_loss  # + 1e-3 * q_reg
-        optimize_expr = U.minimize_and_clip(optimizer, loss, q_func_vars, grad_norm_clipping)
-        # Create callable functions
-        train = U.function(inputs=obs_ph_n + act_ph_n + [target_ph], outputs=loss, updates=[optimize_expr])
-        q_values = U.function(obs_ph_n + act_ph_n, q)
-        # target network
-        target_q = q_func(q_input, 1, scope="target_q_func", num_units=num_units)[:, 0]
-        target_q_func_vars = U.scope_vars(U.absolute_scope_name("target_q_func"))
-        update_target_q = make_update_exp(q_func_vars, target_q_func_vars)
-        target_q_values = U.function(obs_ph_n + act_ph_n, target_q)
-        return train, update_target_q, {'q_values': q_values, 'target_q_values': target_q_values}
+            # for current agent
+            whole_state = state_batch.view(self.batch_size, -1)
+            whole_action = action_batch.view(self.batch_size, -1)
+            self.critic_optimizer[agent].zero_grad()
+            current_q = self.critics[agent](whole_state, whole_action)
+            non_final_next_actions = [self.actors_target[i](non_final_next_states[:, i, :])
+                                      for i in range(self.n_agents)]
+            non_final_next_actions = th.stack(non_final_next_actions)
+            non_final_next_actions = (non_final_next_actions.transpose(0, 1).contiguous())
+            target_q = th.zeros(self.batch_size).type(FloatTensor)
+            target_q[non_final_mask] = self.critics_target[agent](
+                non_final_next_states.view(-1, self.n_agents * self.n_states),
+                non_final_next_actions.view(-1,
+                                            self.n_agents * self.n_actions)
+            ).squeeze()
+            # scale_reward: to scale reward in Q functions
+            target_q = (target_q.unsqueeze(1) * self.gamma) + (reward_batch[:, agent].unsqueeze(1) * 0.01)
+            loss_q = nn.MSELoss()(current_q, target_q.detach())
+            loss_q.backward()
+            self.critic_optimizer[agent].step()
 
+            self.actor_optimizer[agent].zero_grad()
+            ac = action_batch.clone()
+            ac[:, agent, :] = self.actors[agent](state_batch[:, agent, :])
+            whole_action = ac.view(self.batch_size, -1)
+            loss_p = -self.critics[agent](whole_state, whole_action).mean()
+            loss_p.backward()
+            self.actor_optimizer[agent].step()
 
-class MADDPGAgentTrainer(AgentTrainer):
-    def __init__(self, name, actor, critic, obs_shape_n, act_space_n, agent_index, args, local_q_func=False):
-        self.name = name
-        self.n = len(obs_shape_n)
-        self.agent_index = agent_index
-        self.args = args
-        obs_ph_n = []
-        for i in range(self.n):
-            obs_ph_n.append(U.BatchInput(obs_shape_n[i], name="observation" + str(i)).get())
+            c_loss.append(loss_q.item())
+            a_loss.append(loss_p.item())
 
-        # Create all the functions necessary to train the model
-        self.q_train, self.q_update, self.q_debug = q_train(
-            scope=self.name,
-            make_obs_ph_n=obs_ph_n,
-            act_space_n=act_space_n,
-            q_index=agent_index,
-            q_func=critic,
-            optimizer=tf.train.AdamOptimizer(learning_rate=args.lr),
-            grad_norm_clipping=0.5,
-            local_q_func=local_q_func,
-            num_units=args.num_units
-        )
-        self.act, self.p_train, self.p_update, self.p_debug = p_train(
-            scope=self.name,
-            make_obs_ph_n=obs_ph_n,
-            act_space_n=act_space_n,
-            p_index=agent_index,
-            p_func=actor,
-            q_func=critic,
-            optimizer=tf.train.AdamOptimizer(learning_rate=args.lr),
-            grad_norm_clipping=0.5,
-            local_q_func=local_q_func,
-            num_units=args.num_units
-        )
-        # Create experience buffer
-        self.replay_buffer = ReplayBuffer(int(1e6))
+        self.c_losses.append(c_loss)
+        self.a_losses.append(a_loss)
 
-    def action(self, obs):
-        return self.act(obs[None])[0]
+        if step % 100 == 0:
+            for i in range(self.n_agents):
+                soft_update(self.critics_target[i], self.critics[i], self.tau)
+                soft_update(self.actors_target[i], self.actors[i], self.tau)
+            # Record and visual the loss value of Actor and Critic
+            self.writer.add_scalars('critic_loss',
+                                    {'agent_{}'.format(i+1): v for i, v in enumerate(np.mean(self.c_losses, axis=0))},
+                                    step)
+            self.writer.add_scalars('actor_loss',
+                                    {'agent_{}'.format(i+1): v for i, v in enumerate(np.mean(self.a_losses, axis=0))},
+                                    step)
+            self.c_losses, self.a_losses = [], []
 
-    def experience(self, obs, act, rew, new_obs, done):
-        # Store transition in the replay buffer.
-        self.replay_buffer.add(obs, act, rew, new_obs, float(done))
+    def load_model(self, load_path=None):
+        if load_path is None:
+            load_path = self.path['model_path']
 
-    def update(self, agents, t):
-        if t < self.args.learning_start or t % 100 != 0:  # only update every 100 steps
-            return None
+        if load_path is not None:
+            for i, (actor, critic) in enumerate(zip(self.actors, self.critics)):
+                actor_state_dict = th.load(load_path + 'actor_{}.pth'.format(i)).state_dict()
+                critic_state_dict = th.load(load_path + 'critic_{}.pth'.format(i)).state_dict()
 
-        index = self.replay_buffer.make_index(self.args.batch_size)
-        # collect replay sample from all agents
-        obs_n = []
-        obs_next_n = []
-        act_n = []
-        for i in range(self.n):
-            obs, act, rew, obs_next, done = agents[i].replay_buffer.sample_index(index)
-            obs_n.append(obs)
-            obs_next_n.append(obs_next)
-            act_n.append(act)
-        obs, act, rew, obs_next, done = self.replay_buffer.sample_index(index)
+                actor.load_state_dict(actor_state_dict)
+                critic.load_state_dict(critic_state_dict)
+                self.actors_target[i] = deepcopy(actor)
+                self.critics_target[i] = deepcopy(critic)
+        else:
+            print('Load path is empty!')
 
-        # train q network
-        target_act_next_n = [agents[i].p_debug['target_act'](obs_next_n[i]) for i in range(self.n)]
-        target_q_next = self.q_debug['target_q_values'](*(obs_next_n + target_act_next_n))
-        target_q = rew + self.args.gamma * (1.0 - done) * target_q_next
-        q_loss = self.q_train(*(obs_n + act_n + [target_q]))
-        # train p network
-        p_loss = self.p_train(*(obs_n + act_n))
+    def save_model(self, save_path=None):
+        if save_path is None:
+            save_path = self.path['model_path']
 
-        self.p_update()
-        self.q_update()
+        if save_path is not None:
+            for i, (actor, critic) in enumerate(zip(self.actors, self.critics)):
+                th.save(actor, save_path + 'actor_{}.pth'.format(i))
+                th.save(critic, save_path + 'critic_{}.pth'.format(i))
+        else:
+            print('Save path is empty!')
 
-        return [q_loss, p_loss, np.mean(target_q), np.mean(rew), np.mean(target_q_next), np.std(target_q)]
+    def scalars(self, key, value, episode):
+        self.writer.add_scalars(key, value, episode)
+
+    def scalar(self, key, value, episode):
+        self.writer.add_scalar(key, value, episode)
+
+    def close(self):
+        if self.writer is not None:
+            self.writer.close()
+        if self.actor_looker is not None:
+            self.actor_looker.close()
+        if self.critic_looker is not None:
+            self.critic_looker.close()

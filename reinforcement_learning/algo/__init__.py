@@ -1,2 +1,1 @@
-from . import tf_util as U
-from .trainer import MADDPGAgentTrainer
+from .trainer import Trainer
