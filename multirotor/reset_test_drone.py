@@ -4,7 +4,7 @@ import airsim
 import time
 
 # connect to the AirSim simulator
-client = airsim.MultirotorClient()
+client = airsim.MultirotorClient(ip='192.168.1.104')
 client.confirmConnection()
 client.enableApiControl(True)
 client.armDisarm(True)

@@ -16,6 +16,7 @@ def net_visual(dim_input, net, **kwargs):
     print(dim_input, kwargs['filename'])
     xs = [th.randn(*dim).requires_grad_(True) for dim in dim_input]  # 定义一个网络的输入值
     y = net(*xs)  # 获取网络的预测值
+    print(y.shape)
     net_vis = make_dot(y, params=dict(list(net.named_parameters()) + [('x', x) for x in xs]))
     net_vis.render(**kwargs)     # 生成文件
     print('Save to ' + kwargs['directory'] + '{}.{}'.format(kwargs['filename'], kwargs['format']))

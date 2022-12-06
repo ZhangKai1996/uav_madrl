@@ -5,6 +5,7 @@ import torch as th
 
 from algo import Trainer
 from env import AirSimDroneEnv
+from parameters import ip_address
 
 root = "/home/lydia/Documents/AirSim/"
 setting_path = root + "settings.json"
@@ -14,10 +15,12 @@ def input_format(keyword, y_desc='Yes', n_desc='No'):
     while True:
         inputs = input("{} (Yes/yes/y/1):".format(keyword))
         if inputs in ['Yes', 'yes', 'y', '1']:
-            print(y_desc)
+            print('\t--> YES:', y_desc)
+            print('\t     NO:', n_desc, '\n')
             return True
         elif inputs in ['No', 'no', 'n', '0']:
-            print(n_desc)
+            print('\t    YES:', y_desc)
+            print('\t-->  NO:', n_desc, '\n')
             return False
         else:
             print('Please input again')
@@ -54,9 +57,9 @@ def train(args):
     np.random.seed(args.seed)
     th.manual_seed(args.seed)
     # Create environment
-    env = AirSimDroneEnv(ip_address="192.168.1.102",
+    env = AirSimDroneEnv(ip_address=ip_address,
                          step_length=0.75,
-                         image_shape=(5, 144, 256),
+                         image_shape=(3, 270, 480),
                          num_agents=args.num_agents)
     # Create MARL trainer
     trainer = Trainer(env.n,
@@ -69,21 +72,24 @@ def train(args):
         trainer.load_model(load_path=args.load_dir)
 
     # Start iterations
+    print('\n Iteration start...')
     step, episode, reward_record = 0, 0, []
     while True:
+        episode += 1
         obs_n = env.reset()
         for i in range(args.max_episode_len):
             act_n = trainer.act(obs_n, step >= args.learning_start)
-            print(act_n)
             next_obs_n, rew_n, done_n, _ = env.step(act_n)
-            print(rew_n,  done_n)
             if i == args.max_episode_len - 1:
                 next_obs_n = None
-
             step += 1
             reward_record.append(rew_n)
             trainer.add_experience(obs_n, act_n, next_obs_n, rew_n, done_n)
             obs_n = next_obs_n
+
+            print("{:>3d}, {:>5d}, {:>5d}".format(i, step, episode),
+                  ["{:>+.3f}".format(a) for a in act_n.reshape(1, -1)[0]],
+                  ["{:>+6.1f}".format(rew)for rew in rew_n], done_n)
 
             if step >= args.learning_start:
                 trainer.update(step)
@@ -91,7 +97,6 @@ def train(args):
             if sum(done_n) > 0:
                 break
 
-        episode += 1
         if episode % args.save_rate == 0:
             trainer.save_model()
 
@@ -118,7 +123,7 @@ if __name__ == '__main__':
     parser.add_argument("--max-episode-len", type=int, default=1000, help="maximum episode length")
     parser.add_argument("--num-episodes", type=int, default=60000, help="number of episodes")
     parser.add_argument('--memory-length', default=int(1e6), type=int, help='number of experience replay pool')
-    parser.add_argument("--learning-start", type=int, default=1000, help="start updating after this number of step")
+    parser.add_argument("--learning-start", type=int, default=50, help="start updating after this number of step")
     parser.add_argument("--good-policy", type=str, default="algo", help="policy for good agents")
     parser.add_argument("--adv-policy", type=str, default="algo", help="policy of adversaries")
     # Core training parameters
@@ -131,14 +136,13 @@ if __name__ == '__main__':
     # Checkpointing
     parser.add_argument("--exp-name", type=str, default='train', help="name of the experiment")
     parser.add_argument("--seed", type=int, default=1234, help="name of the experiment")
-    parser.add_argument("--save-rate", type=int, default=1000,
+    parser.add_argument("--save-rate", type=int, default=10,
                         help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default=None,
                         help="directory in which training state and model are loaded")
     # Evaluation
     parser.add_argument("--restore", action="store_true", default=False)
-    parser.add_argument("--plots-dir", type=str, default="./trained/curve/",
-                        help="directory where plot data is saved")
+    parser.add_argument("--plots-dir", type=str, default="./trained/curve/", help="directory where plot data is saved")
 
     args_ = parser.parse_args()
     if input_format(keyword='Rewrite the setting.json of Unreal project',
@@ -147,6 +151,6 @@ if __name__ == '__main__':
         rewrite_setting_file(num_agents=args_.num_agents)
 
     if input_format(keyword='The Unreal client has been opened',
-                    y_desc='Start the training process',
+                    y_desc='Execute the train function',
                     n_desc='Not ready yet!'):
         train(args=args_)

@@ -1,11 +1,9 @@
 import os
 import torch as th
 
-
-FloatTensor = th.FloatTensor
-FloatTensorGPU = th.cuda.FloatTensor
-ByteTensor = th.ByteTensor
-ByteTensorGPU = th.cuda.ByteTensor
+device = th.device('cuda') if th.cuda.is_available() else th.device('cpu')
+FloatTensor = th.FloatTensor if not th.cuda.is_available() else th.cuda.FloatTensor
+ByteTensor = th.ByteTensor if not th.cuda.is_available() else th.cuda.ByteTensor
 
 
 def get_folder(folder, root='trained', has_log=False, has_graph=False, has_model=False, allow_exist=False):

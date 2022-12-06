@@ -1,5 +1,5 @@
 import rospy
-from sensor_msgs.msg import Image,CameraInfo
+from sensor_msgs.msg import Image, CameraInfo
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
 from cv_bridge import CvBridge
@@ -33,18 +33,18 @@ class KinectPublisher:
         self.msg_info = CameraInfo()
         self.msg_tf = TFMessage()
 
-    def getDepthImage(self,response_d):
+    def getDepthImage(self, response_d):
         img_depth = np.array(response_d.image_data_float, dtype=np.float32)
         img_depth = img_depth.reshape(response_d.height, response_d.width)
         return img_depth
 
-    def getRGBImage(self,response_rgb):
+    def getRGBImage(self, response_rgb):
         img1d = np.fromstring(response_rgb.image_data_uint8, dtype=np.uint8)
         img_rgb = img1d.reshape(response_rgb.height, response_rgb.width, 3)
         img_rgb = img_rgb[..., :3][..., ::-1]
         return img_rgb
 
-    def enhanceRGB(self,img_rgb):
+    def enhanceRGB(self, img_rgb):
         lab = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2LAB)
         lab_planes = cv2.split(lab)
         clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(10, 10))
@@ -56,7 +56,7 @@ class KinectPublisher:
     def GetCurrentTime(self):
         self.ros_time = rospy.Time.now()
 
-    def CreateRGBMessage(self,img_rgb):
+    def CreateRGBMessage(self, img_rgb):
         self.msg_rgb.header.stamp = self.ros_time
         self.msg_rgb.header.frame_id = "camera_rgb_optical_frame"
         self.msg_rgb.encoding = "bgr8"
@@ -67,7 +67,7 @@ class KinectPublisher:
         self.msg_rgb.step = self.msg_rgb.width * 3
         return self.msg_rgb
 
-    def CreateDMessage(self,img_depth):
+    def CreateDMessage(self, img_depth):
         self.msg_d.header.stamp = self.ros_time
         self.msg_d.header.frame_id = "camera_depth_optical_frame"
         self.msg_d.encoding = "32FC1"
@@ -217,9 +217,3 @@ if __name__ == "__main__":
         del pub.msg_tf.transforms[:]
 
         rate.sleep()
-
-
-
-
-
-
