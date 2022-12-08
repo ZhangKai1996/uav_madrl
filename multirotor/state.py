@@ -2,6 +2,7 @@ import setup_path
 import airsim
 import pprint
 
+
 def print_state():
     print("===============================================================")
     state = client.getMultirotorState()

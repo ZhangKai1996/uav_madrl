@@ -34,7 +34,7 @@ gps_data = client.getGpsData()
 s = pprint.pformat(gps_data)
 print("gps_data: %s" % s)
 
-airsim.wait_key('Press any key to takeoff')
+# airsim.wait_key('Press any key to takeoff')
 print("Taking off...")
 client.armDisarm(True)
 client.takeoffAsync().join()
@@ -42,7 +42,7 @@ client.takeoffAsync().join()
 state = client.getMultirotorState()
 print("state: %s" % pprint.pformat(state))
 
-airsim.wait_key('Press any key to move vehicle to (-10, 10, -10) at 5 m/s')
+# airsim.wait_key('Press any key to move vehicle to (-10, 10, -10) at 5 m/s')
 client.moveToPositionAsync(-10, 10, -10, 5).join()
 
 client.hoverAsync().join()
@@ -50,7 +50,7 @@ client.hoverAsync().join()
 state = client.getMultirotorState()
 print("state: %s" % pprint.pformat(state))
 
-airsim.wait_key('Press any key to take images')
+# airsim.wait_key('Press any key to take images')
 # get camera images from the car
 responses = client.simGetImages([
     airsim.ImageRequest("0", airsim.ImageType.DepthVis),  # depth visualization image
@@ -68,9 +68,7 @@ except OSError:
         raise
 
 for idx, response in enumerate(responses):
-
     filename = os.path.join(tmp_dir, str(idx))
-
     if response.pixels_as_float:
         print("Type %d, size %d" % (response.image_type, len(response.image_data_float)))
         airsim.write_pfm(os.path.normpath(filename + '.pfm'), airsim.get_pfm_array(response))
@@ -83,7 +81,7 @@ for idx, response in enumerate(responses):
         img_rgb = img1d.reshape(response.height, response.width, 3)  # reshape array to 4 channel image array H X W X 3
         cv2.imwrite(os.path.normpath(filename + '.png'), img_rgb)  # write to png
 
-airsim.wait_key('Press any key to reset to original state')
+# airsim.wait_key('Press any key to reset to original state')
 
 client.reset()
 client.armDisarm(False)

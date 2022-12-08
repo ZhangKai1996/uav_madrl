@@ -5,9 +5,10 @@ import os
 import numpy as np
 import cv2
 import pprint
+from parameters import *
 
 # connect to the AirSim simulator
-client = airsim.MultirotorClient()
+client = airsim.MultirotorClient(ip=ip_address)
 client.confirmConnection()
 
 # add new vehicle

@@ -1,11 +1,12 @@
 import setup_path
 import airsim
+from parameters import ip_address
 
 # this script moves the drone to a location, then rests it thousands of time
 # purpose of this script is to stress test reset API
 
 # connect to the AirSim simulator 
-client = airsim.MultirotorClient(ip='192.168.1.102')
+client = airsim.MultirotorClient(ip=ip_address)
 uav_name = 'Drone1'
 client.confirmConnection()
 client.enableApiControl(True, vehicle_name=uav_name)

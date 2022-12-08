@@ -3,6 +3,8 @@ import airsim
 import sys
 import time
 
+from parameters import ip_address
+
 # For high speed ascent and descent on PX4 you may need to set these properties:
 # param set MPC_Z_VEL_MAX_UP 5
 # param set MPC_Z_VEL_MAX_DN 5
@@ -11,7 +13,7 @@ z = 5
 if len(sys.argv) > 1:
     z = float(sys.argv[1])
 
-client = airsim.MultirotorClient()
+client = airsim.MultirotorClient(ip=ip_address)
 client.confirmConnection()
 client.enableApiControl(True)
 client.armDisarm(True)

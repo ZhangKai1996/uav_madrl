@@ -1,10 +1,11 @@
 import setup_path
 import airsim
-
 import time
+from parameters import ip_address
+
 
 # connect to the AirSim simulator
-client = airsim.MultirotorClient()
+client = airsim.MultirotorClient(ip=ip_address)
 client.confirmConnection()
 client.enableApiControl(True)
 client.armDisarm(True)

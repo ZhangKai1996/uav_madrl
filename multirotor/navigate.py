@@ -10,8 +10,9 @@ import time
 import math
 import sys
 import numpy as np
+from parameters import ip_address
 
-client = airsim.MultirotorClient()
+client = airsim.MultirotorClient(ip_address)
 client.confirmConnection()
 client.enableApiControl(True)
 client.armDisarm(True)

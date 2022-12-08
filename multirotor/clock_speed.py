@@ -1,13 +1,13 @@
 import setup_path
 import airsim
-
 import time
+from parameters import *
 
 # Run this script with clock speed in settings.json
 # "ClockSpeed": 1 then change it to 0.5
 
 # connect to the AirSim simulator
-client = airsim.MultirotorClient()
+client = airsim.MultirotorClient(ip=ip_address)
 client.confirmConnection()
 client.enableApiControl(True)
 client.armDisarm(True)

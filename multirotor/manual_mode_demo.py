@@ -8,6 +8,7 @@ import os
 import tempfile
 import pprint
 
+
 # connect to the AirSim simulator
 client = airsim.MultirotorClient()
 client.confirmConnection()

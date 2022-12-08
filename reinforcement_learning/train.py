@@ -59,7 +59,7 @@ def train(args):
     # Create environment
     env = AirSimDroneEnv(ip_address=ip_address,
                          step_length=0.75,
-                         image_shape=(3, 270, 480),
+                         image_shape=(3, 144, 256),
                          num_agents=args.num_agents)
     # Create MARL trainer
     trainer = Trainer(env.n,
@@ -70,7 +70,6 @@ def train(args):
     # Load previous param
     if args.load_dir is not None:
         trainer.load_model(load_path=args.load_dir)
-
     # Start iterations
     print('\n Iteration start...')
     step, episode, reward_record = 0, 0, []
@@ -80,36 +79,28 @@ def train(args):
         for i in range(args.max_episode_len):
             act_n = trainer.act(obs_n, step >= args.learning_start)
             next_obs_n, rew_n, done_n, _ = env.step(act_n)
-            if i == args.max_episode_len - 1:
-                next_obs_n = None
             step += 1
             reward_record.append(rew_n)
             trainer.add_experience(obs_n, act_n, next_obs_n, rew_n, done_n)
             obs_n = next_obs_n
-
             print("{:>3d}, {:>5d}, {:>5d}".format(i, step, episode),
                   ["{:>+.3f}".format(a) for a in act_n.reshape(1, -1)[0]],
                   ["{:>+6.1f}".format(rew)for rew in rew_n], done_n)
-
             if step >= args.learning_start:
                 trainer.update(step)
 
             if sum(done_n) > 0:
                 break
-
         if episode % args.save_rate == 0:
             trainer.save_model()
-
             rew_dict = {'agent_{}'.format(i + 1): v for i, v in enumerate(np.mean(reward_record, axis=0))}
             rew_dict['total'] = np.sum(reward_record, axis=1).mean()
             trainer.scalars("Reward", rew_dict, episode)
             trainer.scalars("Param", {'var': trainer.var}, episode)
             reward_record = []
             print('Episode:', episode, rew_dict)
-
         if episode >= args.num_episodes:
             break
-
     # End environment
     env.close()
 
@@ -120,10 +111,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser("Reinforcement Learning experiments for multi-agent environments")
     # Environment
     parser.add_argument("--num-agents", type=int, default=3, help="number of the agent (drone or car)")
-    parser.add_argument("--max-episode-len", type=int, default=1000, help="maximum episode length")
+    parser.add_argument("--max-episode-len", type=int, default=100, help="maximum episode length")
     parser.add_argument("--num-episodes", type=int, default=60000, help="number of episodes")
     parser.add_argument('--memory-length', default=int(1e6), type=int, help='number of experience replay pool')
-    parser.add_argument("--learning-start", type=int, default=50, help="start updating after this number of step")
+    parser.add_argument("--learning-start", type=int, default=100, help="start updating after this number of step")
     parser.add_argument("--good-policy", type=str, default="algo", help="policy for good agents")
     parser.add_argument("--adv-policy", type=str, default="algo", help="policy of adversaries")
     # Core training parameters
@@ -136,7 +127,7 @@ if __name__ == '__main__':
     # Checkpointing
     parser.add_argument("--exp-name", type=str, default='train', help="name of the experiment")
     parser.add_argument("--seed", type=int, default=1234, help="name of the experiment")
-    parser.add_argument("--save-rate", type=int, default=10,
+    parser.add_argument("--save-rate", type=int, default=100,
                         help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default=None,
                         help="directory in which training state and model are loaded")
