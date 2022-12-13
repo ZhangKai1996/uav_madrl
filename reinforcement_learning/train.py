@@ -1,4 +1,6 @@
 import os
+import time
+from threading import Thread
 
 import numpy as np
 import torch as th
@@ -72,9 +74,11 @@ def train(args):
     if args.load_dir is not None:
         trainer.load_model(load_path=args.load_dir)
 
+    thread = None
     # Start iterations
     print('\n Iteration start...')
     step, episode, reward_record = 0, 0, []
+    start = time.time()
     while True:
         episode += 1
         obs_n = env.reset()
@@ -85,11 +89,21 @@ def train(args):
             reward_record.append(rew_n)
             trainer.add_experience(obs_n, act_n, next_obs_n, rew_n, done_n)
             obs_n = next_obs_n
+
+            end = time.time()
             print("{:>3d}, {:>5d}, {:>5d}".format(i, step, episode),
                   # ["{:>+.3f}".format(a) for a in act_n.reshape(1, -1)[0]],
-                  ["{:>+6.1f}".format(rew)for rew in rew_n], done_n)
+                  ["{:>+6.1f}".format(rew)for rew in rew_n], done_n,
+                  "{:>5.2f}".format(end-start))
+            start = end
+
             if step >= args.learning_start:
-                trainer.update(step)
+                # trainer.update(step)
+                if thread is None:
+                    thread = Thread(target=trainer.update)
+                    thread.start()
+                elif not thread.is_alive():
+                    thread = None
 
             if sum(done_n) > 0:
                 break
@@ -117,7 +131,7 @@ if __name__ == '__main__':
     parser.add_argument("--max-episode-len", type=int, default=100, help="maximum episode length")
     parser.add_argument("--num-episodes", type=int, default=60000, help="number of episodes")
     parser.add_argument('--memory-length', default=int(1e6), type=int, help='number of experience replay pool')
-    parser.add_argument("--learning-start", type=int, default=100, help="start updating after this number of step")
+    parser.add_argument("--learning-start", type=int, default=1000, help="start updating after this number of step")
     parser.add_argument("--good-policy", type=str, default="algo", help="policy for good agents")
     parser.add_argument("--adv-policy", type=str, default="algo", help="policy of adversaries")
     # Core training parameters
@@ -130,7 +144,7 @@ if __name__ == '__main__':
     # Checkpointing
     parser.add_argument("--exp-name", type=str, default='train', help="name of the experiment")
     parser.add_argument("--seed", type=int, default=1234, help="name of the experiment")
-    parser.add_argument("--save-rate", type=int, default=100,
+    parser.add_argument("--save-rate", type=int, default=10,
                         help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default=None,
                         help="directory in which training state and model are loaded")

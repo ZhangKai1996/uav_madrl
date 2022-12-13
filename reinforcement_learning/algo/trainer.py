@@ -1,3 +1,4 @@
+from multiprocessing import Queue, Process
 from copy import deepcopy
 
 import numpy as np
@@ -10,6 +11,45 @@ from .memory import ReplayMemory, Experience
 from .network import Critic, Actor
 from .misc import get_folder, soft_update, FloatTensor
 from .visual import NetLooker, net_visual
+
+
+def update_single_agent(agent, queue, n_agents,
+                        actor, actors_target, critic, critic_target, a_optimizer, c_optimizer, mse_loss,
+                        tau, gamma, memory, batch_size, update_target):
+    transitions = memory.sample(batch_size)
+    batch = Experience(*zip(*transitions))
+
+    state_batch = th.stack(batch.states).type(FloatTensor)
+    action_batch = th.stack(batch.actions).type(FloatTensor)
+    next_states_batch = th.stack(batch.next_states).type(FloatTensor)
+    reward_batch = th.stack(batch.rewards).type(FloatTensor).unsqueeze(dim=-1)
+    done_batch = th.stack(batch.dones).type(FloatTensor).unsqueeze(dim=-1)
+
+    c_optimizer.zero_grad()
+    current_q = critic(state_batch, action_batch)
+    next_actions = th.stack([actors_target[i](next_states_batch[:, i]) for i in range(n_agents)],
+                            dim=-1)
+    target_next_q = critic_target(next_states_batch, next_actions)
+    target_q = target_next_q * gamma * (1 - done_batch[:, agent, :]) + reward_batch[:, agent, :]
+    loss_q = mse_loss(current_q, target_q.detach())
+    loss_q.backward()
+    c_optimizer.step()
+
+    a_optimizer.zero_grad()
+    ac = action_batch.clone()
+    ac[:, agent, :] = actor(state_batch[:, agent, :])
+    loss_p = -critic(state_batch, ac).mean()
+    loss_p.backward()
+    a_optimizer.step()
+
+    if update_target:
+        soft_update(critic_target, critic, tau)
+        soft_update(actors_target[agent], actor, tau)
+
+    if queue is not None:
+        queue.put([loss_q.item(), loss_p.item()])
+    else:
+        return loss_q.item(), loss_p.item()
 
 
 class Trainer:
@@ -52,6 +92,7 @@ class Trainer:
             self.mse_loss.cuda()
 
         self.c_losses, self.a_losses = [], []
+        self.step = 0
         self.__addiction(n_agents, dim_obs, dim_act, folder)
 
     def __addiction(self, n_agents, dim_obs, dim_act, folder):
@@ -114,57 +155,40 @@ class Trainer:
             self.var *= 0.999998
         return act_n.data.cpu().numpy()
 
-    def update(self, step):
-        batch_size = self.batch_size
+    def update(self):
+        self.step += 1
+        num_threads = self.n_agents
+        update_target = (self.step % 100 == 0)
+
+        queue = Queue()
+        workers = []
+        for i in range(num_threads):
+            work_args = (i, queue, num_threads,
+                         self.actors[i], self.actors_target, self.critics[i], self.critics_target[i],
+                         self.actors_optimizer[i], self.critics_optimizer[i], self.mse_loss,
+                         self.tau, self.gamma,
+                         self.memory,  self.batch_size,
+                         update_target, )
+            workers.append(Process(target=update_single_agent, args=work_args))
+        for worker in workers:
+            worker.start()
 
         c_loss, a_loss = [], []
-        for agent in range(self.n_agents):
-            transitions = self.memory.sample(batch_size)
-            batch = Experience(*zip(*transitions))
-
-            state_batch = th.stack(batch.states).type(FloatTensor)
-            action_batch = th.stack(batch.actions).type(FloatTensor)
-            next_states_batch = th.stack(batch.next_states).type(FloatTensor)
-            reward_batch = th.stack(batch.rewards).type(FloatTensor).unsqueeze(dim=-1)
-            done_batch = th.stack(batch.dones).type(FloatTensor).unsqueeze(dim=-1)
-
-            self.critics_optimizer[agent].zero_grad()
-            current_q = self.critics[agent](state_batch, action_batch)
-            next_actions = th.stack([self.actors_target[i](next_states_batch[:, i])
-                                     for i in range(self.n_agents)],
-                                    dim=-1)
-            target_next_q = self.critics_target[agent](next_states_batch, next_actions)
-            target_q = target_next_q * self.gamma * (1 - done_batch[:, agent, :]) + reward_batch[:, agent, :]
-            loss_q = self.mse_loss(current_q, target_q.detach())
-            loss_q.backward()
-            self.critics_optimizer[agent].step()
-
-            self.actors_optimizer[agent].zero_grad()
-            ac = action_batch.clone()
-            ac[:, agent, :] = self.actors[agent](state_batch[:, agent, :])
-            loss_p = -self.critics[agent](state_batch, ac).mean()
-            loss_p.backward()
-            self.actors_optimizer[agent].step()
-
-            c_loss.append(loss_q.item())
-            a_loss.append(loss_p.item())
-
+        for _ in workers:
+            [loss_q, lost_p] = queue.get()
+            c_loss.append(loss_q)
+            a_loss.append(lost_p)
         self.c_losses.append(c_loss)
         self.a_losses.append(a_loss)
 
-        if step % 100 == 0:
-            for i in range(self.n_agents):
-                soft_update(self.critics_target[i], self.critics[i], self.tau)
-                soft_update(self.actors_target[i], self.actors[i], self.tau)
+        if update_target:
             # Record and visual the loss value of Actor and Critic
             self.scalars(key='critic_loss',
-                         value={'agent_{}'.format(i + 1): v
-                                for i, v in enumerate(np.mean(self.c_losses, axis=0))},
-                         episode=step)
+                         value={'agent_{}'.format(i + 1): v for i, v in enumerate(np.mean(self.c_losses, axis=0))},
+                         episode=self.step)
             self.scalars(key='actor_loss',
-                         value={'agent_{}'.format(i + 1): v
-                                for i, v in enumerate(np.mean(self.a_losses, axis=0))},
-                         episode=step)
+                         value={'agent_{}'.format(i + 1): v for i, v in enumerate(np.mean(self.a_losses, axis=0))},
+                         episode=self.step)
             self.c_losses, self.a_losses = [], []
 
     def load_model(self, load_path=None):

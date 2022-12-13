@@ -21,8 +21,7 @@ def add_ADI(i, image, views, n, width, height, limit, span=5):
     img_h = cv2.line(img_h,
                      (center_x_h, 0),
                      (center_x_h, height_h),
-                     (0, 0, 0), 1)
-
+                     (0, 255, 255), 1)
     # vertical
     width_v = height // 4
     img_v = np.ones((height, width_v, 3), dtype=np.uint8) * 255
@@ -34,7 +33,7 @@ def add_ADI(i, image, views, n, width, height, limit, span=5):
     img_v = cv2.line(img_v,
                      (0, center_y_v),
                      (width_v, center_y_v),
-                     (0, 0, 0), 1)
+                     (0, 255, 255), 1)
     # blank area
     img_blank = np.ones((height_h, width_v, 3), dtype=np.uint8) * 255
     img_blank = cv2.putText(img_blank,
@@ -43,7 +42,6 @@ def add_ADI(i, image, views, n, width, height, limit, span=5):
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                             (0, 0, 0), 1,
                             cv2.LINE_AA)
-
     # ball
     tmp_h, tmp_v = height_h // n, width_v // n
     radius_h = (tmp_h - span) // 2

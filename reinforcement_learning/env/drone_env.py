@@ -1,5 +1,6 @@
 import numpy as np
 import time
+import cv2
 
 import airsim
 from .airsim_env import AirSimEnv
@@ -17,7 +18,7 @@ class AirSimDroneEnv(AirSimEnv):
         self.client.confirmConnection()
         self.image_requests = [airsim.ImageRequest("front_center", airsim.ImageType.Scene, False, False), ]
         self.fixed_points = None
-        self.limit = 60.0
+        self.limit = 90.0
 
     def reset(self):
         client = self.client
@@ -38,7 +39,7 @@ class AirSimDroneEnv(AirSimEnv):
         print('Reset is completed!')
         return self.__get_obs()
 
-    def step(self, actions, duration=5):
+    def step(self, actions, duration=3):
         client = self.client
         n = self.n
         step_size = self.step_length
@@ -46,32 +47,42 @@ class AirSimDroneEnv(AirSimEnv):
             uav_name = 'Drone{}'.format(i + 1)
             state = client.getMultirotorState(vehicle_name=uav_name).kinematics_estimated
             vel = state.linear_velocity
-            pos = state.position
-            print(uav_name,
-                  '{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(vel.x_val, vel.y_val, vel.z_val),
-                  ["{:>+.3f}".format(a) for a in action], end='\t')
+            # pos = state.position
+            # print(uav_name,
+            #       '{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(vel.x_val, vel.y_val, vel.z_val),
+            #       ["{:>+.3f}".format(a) for a in action], end='\t')
             new_x_val, new_y_val = vel.x_val+action[0]*step_size, vel.y_val+action[1]*step_size
-            print('{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(new_x_val, new_y_val, vel.z_val + action[2]), end='\t')
-            print('{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(pos.x_val, pos.y_val, pos.z_val))
-            if i == n - 1:
+            # print('{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(new_x_val, new_y_val, vel.z_val + action[2]), end='\t')
+            # print('{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(pos.x_val, pos.y_val, pos.z_val))
+            if i != n - 1:
                 client.moveByVelocityAsync(new_x_val,
                                            new_y_val,
                                            vel.z_val + action[2],
                                            duration=duration,
                                            # drivetrain=airsim.DrivetrainType.ForwardOnly,
-                                           # drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom,
-                                           # yaw_mode=airsim.YawMode(False, absolute_bearing((new_x_val, new_y_val))),
-                                           vehicle_name=uav_name).join()
+                                           drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom,
+                                           yaw_mode=airsim.YawMode(False, absolute_bearing((new_x_val, new_y_val))),
+                                           vehicle_name=uav_name)
             else:
                 client.moveByVelocityAsync(new_x_val,
                                            new_y_val,
                                            vel.z_val + action[2],
                                            duration=duration,
                                            # drivetrain=airsim.DrivetrainType.ForwardOnly,
-                                           # drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom,
-                                           # yaw_mode=airsim.YawMode(False, absolute_bearing((new_x_val, new_y_val))),
-                                           vehicle_name=uav_name)
-        time.sleep(duration)
+                                           drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom,
+                                           yaw_mode=airsim.YawMode(False, absolute_bearing((new_x_val, new_y_val))),
+                                           vehicle_name=uav_name).join()
+        # print()
+        # for i in range(n):
+        #     uav_name = 'Drone{}'.format(i + 1)
+        #     state = client.getMultirotorState(vehicle_name=uav_name).kinematics_estimated
+        #     vel = state.linear_velocity
+        #     pos = state.position
+        #     print(uav_name,
+        #           '{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(vel.x_val, vel.y_val, vel.z_val),
+        #           '{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(pos.x_val, pos.y_val, pos.z_val))
+        # print()
+        # time.sleep(duration)
         rewards, dones = self.__compute_reward()
         return self.__get_obs(), rewards, dones, {}
 
@@ -82,7 +93,7 @@ class AirSimDroneEnv(AirSimEnv):
         n = self.n
         limit = self.limit
 
-        obs_n = []
+        obs_n, obs_rgb = [], []
         for i in range(n):
             uav_name = 'Drone{}'.format(i + 1)
             state = client.getMultirotorState(vehicle_name=uav_name).kinematics_estimated
@@ -102,11 +113,12 @@ class AirSimDroneEnv(AirSimEnv):
             img1d = np.fromstring(response.image_data_uint8, dtype=np.uint8)
             img_rgb = np.reshape(img1d, (height, width, 3))
             img_rgb = add_ADI(i, img_rgb, views, n, width, height, limit)
-            # if uav_name == 'Drone1':
-            #     cv2.imshow(uav_name, img_rgb)
-            #     cv2.waitKey(1)
-            #     cv2.destroyAllWindows()
+            obs_rgb.append(img_rgb)
             obs_n.append(np.transpose(img_rgb, (2, 0, 1)))
+
+        cv2.imshow('Observation', np.hstack(obs_rgb))
+        cv2.waitKey(1)
+        cv2.destroyAllWindows()
         return np.stack(obs_n)
 
     def __compute_reward(self):
