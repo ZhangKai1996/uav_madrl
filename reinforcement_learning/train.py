@@ -58,18 +58,20 @@ def train(args):
     th.manual_seed(args.seed)
     # Create environment
     env = AirSimDroneEnv(ip_address=ip_address,
-                         step_length=0.75,
-                         image_shape=(3, 144, 256),
+                         # image_shape=(3, 144, 256),
+                         image_shape=(3, 180, 292),
+                         step_length=0.25,
                          num_agents=args.num_agents)
     # Create MARL trainer
-    trainer = Trainer(env.n,
-                      env.image_shape,
-                      env.action_space.shape[0],
-                      args,
+    trainer = Trainer(n_agents=env.n,
+                      dim_obs=env.image_shape,
+                      dim_act=env.action_space.shape[0],
+                      args=args,
                       folder=make_exp_id(args_))
     # Load previous param
     if args.load_dir is not None:
         trainer.load_model(load_path=args.load_dir)
+
     # Start iterations
     print('\n Iteration start...')
     step, episode, reward_record = 0, 0, []
@@ -84,7 +86,7 @@ def train(args):
             trainer.add_experience(obs_n, act_n, next_obs_n, rew_n, done_n)
             obs_n = next_obs_n
             print("{:>3d}, {:>5d}, {:>5d}".format(i, step, episode),
-                  ["{:>+.3f}".format(a) for a in act_n.reshape(1, -1)[0]],
+                  # ["{:>+.3f}".format(a) for a in act_n.reshape(1, -1)[0]],
                   ["{:>+6.1f}".format(rew)for rew in rew_n], done_n)
             if step >= args.learning_start:
                 trainer.update(step)
@@ -103,6 +105,7 @@ def train(args):
             break
     # End environment
     env.close()
+    trainer.close()
 
 
 if __name__ == '__main__':
@@ -131,9 +134,6 @@ if __name__ == '__main__':
                         help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default=None,
                         help="directory in which training state and model are loaded")
-    # Evaluation
-    parser.add_argument("--restore", action="store_true", default=False)
-    parser.add_argument("--plots-dir", type=str, default="./trained/curve/", help="directory where plot data is saved")
 
     args_ = parser.parse_args()
     if input_format(keyword='Rewrite the setting.json of Unreal project',

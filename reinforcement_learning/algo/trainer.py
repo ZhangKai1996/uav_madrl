@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from .memory import ReplayMemory, Experience
 from .network import Critic, Actor
-from .misc import device, get_folder, soft_update, FloatTensor
+from .misc import get_folder, soft_update, FloatTensor
 from .visual import NetLooker, net_visual
 
 
@@ -29,15 +29,27 @@ class Trainer:
         self.actors_optimizer, self.critics_optimizer = [], []
         for _ in range(n_agents):
             actor = Actor(dim_obs, dim_act)
-            self.actors.append(actor.to(device))
-            self.actors_target.append(deepcopy(actor).to(device))
+            self.actors.append(actor)
+            self.actors_target.append(deepcopy(actor))
             self.actors_optimizer.append(Adam(actor.parameters(), lr=args.a_lr))
 
             critic = Critic(n_agents, dim_obs, dim_act)
-            self.critics.append(critic.to(device))
-            self.critics_target.append(deepcopy(critic).to(device))
+            self.critics.append(critic)
+            self.critics_target.append(deepcopy(critic))
             self.critics_optimizer.append(Adam(critic.parameters(), lr=args.c_lr))
-        self.mse_loss = nn.MSELoss().to(device)
+        self.mse_loss = nn.MSELoss()
+
+        self.use_cuda = th.cuda.is_available()
+        if self.use_cuda:
+            for x in self.actors:
+                x.cuda()
+            for x in self.critics:
+                x.cuda()
+            for x in self.actors_target:
+                x.cuda()
+            for x in self.critics_target:
+                x.cuda()
+            self.mse_loss.cuda()
 
         self.c_losses, self.a_losses = [], []
         self.__addiction(n_agents, dim_obs, dim_act, folder)
@@ -116,10 +128,10 @@ class Trainer:
             reward_batch = th.stack(batch.rewards).type(FloatTensor).unsqueeze(dim=-1)
             done_batch = th.stack(batch.dones).type(FloatTensor).unsqueeze(dim=-1)
 
-            # for current agent
             self.critics_optimizer[agent].zero_grad()
             current_q = self.critics[agent](state_batch, action_batch)
-            next_actions = th.stack([self.actors_target[i](next_states_batch[:, i]) for i in range(self.n_agents)],
+            next_actions = th.stack([self.actors_target[i](next_states_batch[:, i])
+                                     for i in range(self.n_agents)],
                                     dim=-1)
             target_next_q = self.critics_target[agent](next_states_batch, next_actions)
             target_q = target_next_q * self.gamma * (1 - done_batch[:, agent, :]) + reward_batch[:, agent, :]
@@ -145,14 +157,14 @@ class Trainer:
                 soft_update(self.critics_target[i], self.critics[i], self.tau)
                 soft_update(self.actors_target[i], self.actors[i], self.tau)
             # Record and visual the loss value of Actor and Critic
-            self.writer.add_scalars('critic_loss',
-                                    {'agent_{}'.format(i + 1): v
-                                     for i, v in enumerate(np.mean(self.c_losses, axis=0))},
-                                    step)
-            self.writer.add_scalars('actor_loss',
-                                    {'agent_{}'.format(i + 1): v
-                                     for i, v in enumerate(np.mean(self.a_losses, axis=0))},
-                                    step)
+            self.scalars(key='critic_loss',
+                         value={'agent_{}'.format(i + 1): v
+                                for i, v in enumerate(np.mean(self.c_losses, axis=0))},
+                         episode=step)
+            self.scalars(key='actor_loss',
+                         value={'agent_{}'.format(i + 1): v
+                                for i, v in enumerate(np.mean(self.a_losses, axis=0))},
+                         episode=step)
             self.c_losses, self.a_losses = [], []
 
     def load_model(self, load_path=None):
@@ -170,6 +182,7 @@ class Trainer:
                 self.critics_target[i] = deepcopy(critic)
         else:
             print('Load path is empty!')
+            raise NotImplementedError
 
     def save_model(self, save_path=None):
         if save_path is None:
@@ -181,6 +194,7 @@ class Trainer:
                 th.save(critic, save_path + 'critic_{}.pth'.format(i))
         else:
             print('Save path is empty!')
+            raise NotImplementedError
 
     def scalars(self, key, value, episode):
         self.writer.add_scalars(key, value, episode)

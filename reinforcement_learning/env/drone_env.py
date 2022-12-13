@@ -1,50 +1,28 @@
-import math
 import numpy as np
 import time
-import cv2
 
 import airsim
 from .airsim_env import AirSimEnv
-
-
-def bearing(p1, p0=(0.0, 0.0)):
-    delta_x = p1[0] - p0[0]
-    delta_y = p1[1] - p0[1]
-    if delta_x == 0.0:
-        return abs(delta_y) / delta_y * 90.0
-
-    tan_v = delta_y / delta_x
-    angle = math.atan(tan_v) * 180.0 / math.pi
-    if tan_v > 0:
-        angle += int(delta_y < 0) * 180.0
-    else:
-        angle -= int(delta_y > 0) * 180.0
-    angle = (angle + 360) % 360
-    if angle >= 180.0:
-        angle -= 360
-    return angle
+from .render import add_ADI
+from .util import *
 
 
 class AirSimDroneEnv(AirSimEnv):
-    def __init__(self, ip_address, step_length, image_shape, num_agents=3):
+    def __init__(self, ip_address, image_shape, step_length=1.0, num_agents=3):
         super().__init__(image_shape)
-        self.step_length = step_length
         self.image_shape = image_shape
+        self.step_length = step_length
         self.n = num_agents
         self.client = airsim.MultirotorClient(ip=ip_address)
         self.client.confirmConnection()
-        self.image_requests = [airsim.ImageRequest("front_center", airsim.ImageType.Scene, False, False),
-                               airsim.ImageRequest("front_left", airsim.ImageType.Scene, False, False),
-                               airsim.ImageRequest("bottom_center", airsim.ImageType.Scene, False, False)]
+        self.image_requests = [airsim.ImageRequest("front_center", airsim.ImageType.Scene, False, False), ]
         self.fixed_points = None
-
         self.limit = 60.0
 
     def reset(self):
         client = self.client
         client.reset()
         n = self.n
-        fixed_points = []
         for i in range(n):
             uav_name = 'Drone{}'.format(i + 1)
             client.enableApiControl(True, uav_name)
@@ -53,27 +31,47 @@ class AirSimDroneEnv(AirSimEnv):
                 client.moveToZAsync(-10.0, 3, vehicle_name=uav_name)
             else:
                 client.moveToZAsync(-10.0, 3, vehicle_name=uav_name).join()
-            random_point = np.random.randint(0, 100, size=(3,))
-            random_point[-1] = -50.0
-            fixed_points.append(list(random_point))
-        self.fixed_points = fixed_points
+
+        random_point = np.random.randint(0, 100, size=(n, 3))
+        random_point[:, -1] *= -1
+        self.fixed_points = random_point
         print('Reset is completed!')
         return self.__get_obs()
 
-    def step(self, actions):
+    def step(self, actions, duration=5):
         client = self.client
+        n = self.n
+        step_size = self.step_length
         for i, action in enumerate(actions):
             uav_name = 'Drone{}'.format(i + 1)
-            vel = client.getMultirotorState(vehicle_name=uav_name).kinematics_estimated.linear_velocity
-            new_x_val, new_y_val = vel.x_val + action[0] * 2, vel.y_val + action[1] * 2
-            client.moveByVelocityAsync(new_x_val,
-                                       new_y_val,
-                                       vel.z_val + action[2] * 2,
-                                       duration=5,
-                                       drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom,
-                                       yaw_mode=airsim.YawMode(False, bearing((new_x_val, new_y_val))),
-                                       vehicle_name=uav_name)
-        time.sleep(5)
+            state = client.getMultirotorState(vehicle_name=uav_name).kinematics_estimated
+            vel = state.linear_velocity
+            pos = state.position
+            print(uav_name,
+                  '{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(vel.x_val, vel.y_val, vel.z_val),
+                  ["{:>+.3f}".format(a) for a in action], end='\t')
+            new_x_val, new_y_val = vel.x_val+action[0]*step_size, vel.y_val+action[1]*step_size
+            print('{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(new_x_val, new_y_val, vel.z_val + action[2]), end='\t')
+            print('{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(pos.x_val, pos.y_val, pos.z_val))
+            if i == n - 1:
+                client.moveByVelocityAsync(new_x_val,
+                                           new_y_val,
+                                           vel.z_val + action[2],
+                                           duration=duration,
+                                           # drivetrain=airsim.DrivetrainType.ForwardOnly,
+                                           # drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom,
+                                           # yaw_mode=airsim.YawMode(False, absolute_bearing((new_x_val, new_y_val))),
+                                           vehicle_name=uav_name).join()
+            else:
+                client.moveByVelocityAsync(new_x_val,
+                                           new_y_val,
+                                           vel.z_val + action[2],
+                                           duration=duration,
+                                           # drivetrain=airsim.DrivetrainType.ForwardOnly,
+                                           # drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom,
+                                           # yaw_mode=airsim.YawMode(False, absolute_bearing((new_x_val, new_y_val))),
+                                           vehicle_name=uav_name)
+        time.sleep(duration)
         rewards, dones = self.__compute_reward()
         return self.__get_obs(), rewards, dones, {}
 
@@ -87,68 +85,28 @@ class AirSimDroneEnv(AirSimEnv):
         obs_n = []
         for i in range(n):
             uav_name = 'Drone{}'.format(i + 1)
-            pos = client.getMultirotorState(vehicle_name=uav_name).kinematics_estimated.position
+            state = client.getMultirotorState(vehicle_name=uav_name).kinematics_estimated
+            pos = state.position
+            vel = state.linear_velocity
+            x_y_view_vel = absolute_bearing((vel.x_val, vel.y_val))
+
             views = []
             for p in fixed_points:
                 # y_z_view = bearing((p[1], p[2]), (pos.y_val, pos.z_val))  # x
-                x_z_view = bearing((p[0], p[2]), (pos.x_val, pos.z_val))  # y
-                x_y_view = bearing((p[0], p[1]), (pos.x_val, pos.y_val))  # z
-                # views.append([x_y_view, x_z_view, y_z_view])
+                x_z_view = relative_bearing((pos.x_val, pos.z_val), (p[0], p[2]))  # y
+                x_y_view = relative_bearing((pos.x_val, pos.y_val), (p[0], p[1]), reference=x_y_view_vel)  # z
                 views.append([x_y_view, x_z_view])
 
             response = client.simGetImages(image_requests, vehicle_name=uav_name)[0]
             height, width = response.height, response.width
             img1d = np.fromstring(response.image_data_uint8, dtype=np.uint8)
             img_rgb = np.reshape(img1d, (height, width, 3))
-            # img_rgb = cv2.ellipse(img_rgb,
-            #                       (width // 2, height // 2),
-            #                       (width // 2 - 10, height // 2 - 10),
-            #                       0, 0, 360,
-            #                       (0, 255, 0),
-            #                       1)
-            center_x, center_y = width // 2, height // 2
-            width_r, height_r = width // 2, height // 6
-            radius = int(height_r / (n-1) / 2)
-            # horizontal rectangle
-            img_rgb = cv2.rectangle(img_rgb,
-                                    (center_x - width_r // 2, height - 10 - height_r),
-                                    (center_x + width_r // 2, height - 10),
-                                    (0, 255, 0), 1)
-            # vertical rectangle
-            img_rgb = cv2.rectangle(img_rgb,
-                                    (width - 10 - height_r, center_y - width_r // 2),
-                                    (width - 10, center_y + width_r // 2),
-                                    (0, 255, 0), 1)
-            img_rgb = cv2.line(img_rgb,
-                               (center_x, height - 10 - height_r),
-                               (center_x, height - 10),
-                               (0, 255, 0), 1)
-            img_rgb = cv2.line(img_rgb,
-                               (width - 10 - height_r, center_y),
-                               (width - 10, center_y),
-                               (0, 255, 0), 1)
-            for [horizontal, vertical] in views:
-                if abs(horizontal) >= limit:
-                    horizontal = abs(horizontal) / horizontal * limit
-                delta = int(horizontal / limit * width_r / 2)
-                img_rgb = cv2.circle(img_rgb,
-                                     (center_x+delta, height-10-height_r//2),
-                                     radius,
-                                     (0, 0, 255), 1)
-
-                if abs(vertical) >= limit:
-                    vertical = abs(vertical) / vertical * limit
-                delta = int(vertical / limit * height_r / 2)
-                img_rgb = cv2.circle(img_rgb,
-                                     (width-10-height_r//2, center_y+delta),
-                                     radius,
-                                     (0, 0, 255), 1)
-            image = np.transpose(img_rgb, (2, 0, 1))
-            if uav_name == 'Drone1':
-                cv2.imshow(uav_name, img_rgb)
-                cv2.waitKey(1)
-                cv2.destroyAllWindows()
-            obs_n.append(image)
+            img_rgb = add_ADI(i, img_rgb, views, n, width, height, limit)
+            # if uav_name == 'Drone1':
+            #     cv2.imshow(uav_name, img_rgb)
+            #     cv2.waitKey(1)
+            #     cv2.destroyAllWindows()
+            obs_n.append(np.transpose(img_rgb, (2, 0, 1)))
         return np.stack(obs_n)
 
     def __compute_reward(self):

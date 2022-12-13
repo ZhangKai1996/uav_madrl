@@ -34,7 +34,7 @@ vy = 0
 print("moving by velocity vx=" + str(vx) + ", vy=" + str(vy) + ", yaw=90")
 client.moveByVelocityZAsync(vx, vy, z, duration,
                             airsim.DrivetrainType.MaxDegreeOfFreedom,
-                            airsim.YawMode(False, 45)).join()
+                            airsim.YawMode(False, 90)).join()
 time.sleep(delay)
 vx = 0
 vy = speed

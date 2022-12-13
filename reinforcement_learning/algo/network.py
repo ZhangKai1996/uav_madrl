@@ -12,7 +12,7 @@ class Critic(nn.Module):
         self.conv3 = nn.Conv2d(4, 8, kernel_size=5)
         self.conv4 = nn.Conv2d(8, 8, kernel_size=5)
         self.mp = nn.MaxPool2d(2)
-        self.FC = nn.Linear(1920, 128)
+        self.FC = nn.Linear(3136, 128)
 
         self.FC1 = nn.Linear((128 + dim_act) * n_agent, 256)
         self.FC2 = nn.Linear(256, 128)
@@ -45,7 +45,7 @@ class Actor(nn.Module):
         self.conv4 = nn.Conv2d(8, 8, kernel_size=5)
         self.mp = nn.MaxPool2d(2)
 
-        self.FC1 = nn.Linear(1920, 512)
+        self.FC1 = nn.Linear(3136, 512)
         self.FC2 = nn.Linear(512, 128)
         self.FC3 = nn.Linear(128, dim_act)
 
