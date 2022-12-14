@@ -1,3 +1,5 @@
+import setup_path
+
 import copy
 
 import torch as th
@@ -9,12 +11,12 @@ standard_width = 1600
 standard_height = 900
 
 
-def net_visual(dim_input, net, **kwargs):
+def net_visual(dim_input, net, d_type=th.FloatTensor, **kwargs):
     """
     支持MLP、CNN和RNN三种网络的可视化。
     """
     print(dim_input, kwargs['filename'])
-    xs = [th.randn(*dim).requires_grad_(True) for dim in dim_input]  # 定义一个网络的输入值
+    xs = [th.randn(*dim).type(d_type).requires_grad_(True) for dim in dim_input]  # 定义一个网络的输入值
     y = net(*xs)  # 获取网络的预测值
     print(y.shape)
     net_vis = make_dot(y, params=dict(list(net.named_parameters()) + [('x', x) for x in xs]))

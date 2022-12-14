@@ -1,8 +1,11 @@
+import setup_path
+
 import numpy as np
 import time
 import cv2
 
 import airsim
+
 from .airsim_env import AirSimEnv
 from .render import add_ADI
 from .util import *
@@ -54,6 +57,7 @@ class AirSimDroneEnv(AirSimEnv):
             new_x_val, new_y_val = vel.x_val+action[0]*step_size, vel.y_val+action[1]*step_size
             # print('{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(new_x_val, new_y_val, vel.z_val + action[2]), end='\t')
             # print('{:>+.3f}, {:>+.3f}, {:>+.3f}'.format(pos.x_val, pos.y_val, pos.z_val))
+            # print(absolute_bearing((new_x_val, new_y_val)))
             if i != n - 1:
                 client.moveByVelocityAsync(new_x_val,
                                            new_y_val,
@@ -116,9 +120,9 @@ class AirSimDroneEnv(AirSimEnv):
             obs_rgb.append(img_rgb)
             obs_n.append(np.transpose(img_rgb, (2, 0, 1)))
 
-        cv2.imshow('Observation', np.hstack(obs_rgb))
-        cv2.waitKey(1)
-        cv2.destroyAllWindows()
+        # cv2.imshow('Observation', np.hstack(obs_rgb))
+        # cv2.waitKey(1)
+        # cv2.destroyAllWindows()
         return np.stack(obs_n)
 
     def __compute_reward(self):

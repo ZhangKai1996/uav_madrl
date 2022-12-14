@@ -1,3 +1,5 @@
+import setup_path
+
 from multiprocessing import Queue, Process
 from copy import deepcopy
 
@@ -115,6 +117,7 @@ class Trainer:
             print('Draw the net of Actor and Critic!')
             net_visual([(1,) + dim_obs],
                        self.actors[0],
+                       d_type=FloatTensor,
                        filename='actor',
                        directory=self.path['graph_path'],
                        format='png',
@@ -125,6 +128,7 @@ class Trainer:
                                           root=self.path['graph_path'])
             net_visual([(1, n_agents,) + dim_obs, (1, n_agents, dim_act)],
                        self.critics[0],
+                       d_type=FloatTensor,
                        filename='critic',
                        directory=self.path['graph_path'],
                        format='png',

@@ -62,7 +62,7 @@ def train(args):
     env = AirSimDroneEnv(ip_address=ip_address,
                          # image_shape=(3, 144, 256),
                          image_shape=(3, 180, 292),
-                         step_length=0.25,
+                         step_length=1.0,
                          num_agents=args.num_agents)
     # Create MARL trainer
     trainer = Trainer(n_agents=env.n,
@@ -76,7 +76,7 @@ def train(args):
 
     thread = None
     # Start iterations
-    print('\n Iteration start...')
+    print('Iteration start...')
     step, episode, reward_record = 0, 0, []
     start = time.time()
     while True:
@@ -92,8 +92,9 @@ def train(args):
 
             end = time.time()
             print("{:>3d}, {:>5d}, {:>5d}".format(i, step, episode),
-                  # ["{:>+.3f}".format(a) for a in act_n.reshape(1, -1)[0]],
-                  ["{:>+6.1f}".format(rew)for rew in rew_n], done_n,
+                  ["{:>+.2f}".format(a) for a in act_n.reshape(1, -1)[0]],
+                  ["{:>+7.2f}".format(rew)for rew in rew_n],
+                  # done_n,
                   "{:>5.2f}".format(end-start))
             start = end
 
@@ -143,7 +144,7 @@ if __name__ == '__main__':
     parser.add_argument("--num-units", type=int, default=128, help="number of units in the mlp")
     # Checkpointing
     parser.add_argument("--exp-name", type=str, default='train', help="name of the experiment")
-    parser.add_argument("--seed", type=int, default=1234, help="name of the experiment")
+    parser.add_argument("--seed", type=int, default=1111, help="name of the experiment")
     parser.add_argument("--save-rate", type=int, default=10,
                         help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default=None,

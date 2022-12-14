@@ -1,3 +1,5 @@
+import setup_path
+
 from collections import namedtuple
 import random
 

@@ -1,3 +1,5 @@
+import setup_path
+
 import gym
 from gym import spaces
 import numpy as np

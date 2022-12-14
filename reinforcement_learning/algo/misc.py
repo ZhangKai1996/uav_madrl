@@ -1,3 +1,5 @@
+import setup_path
+
 import os
 import torch as th
 
