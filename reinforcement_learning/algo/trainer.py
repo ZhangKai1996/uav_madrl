@@ -1,3 +1,5 @@
+import time
+
 import setup_path
 
 from multiprocessing import Queue, Process
@@ -5,8 +7,8 @@ from copy import deepcopy
 
 import numpy as np
 import torch as th
-from torch.optim import Adam
 import torch.nn as nn
+from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 
 from .memory import ReplayMemory, Experience
@@ -21,11 +23,17 @@ def update_single_agent(agent, queue, n_agents,
     transitions = memory.sample(batch_size)
     batch = Experience(*zip(*transitions))
 
-    state_batch = th.stack(batch.states).type(FloatTensor)
-    action_batch = th.stack(batch.actions).type(FloatTensor)
-    next_states_batch = th.stack(batch.next_states).type(FloatTensor)
-    reward_batch = th.stack(batch.rewards).type(FloatTensor).unsqueeze(dim=-1)
-    done_batch = th.stack(batch.dones).type(FloatTensor).unsqueeze(dim=-1)
+    # state_batch = th.stack(batch.states).type(FloatTensor)
+    # action_batch = th.stack(batch.actions).type(FloatTensor)
+    # next_states_batch = th.stack(batch.next_states).type(FloatTensor)
+    # reward_batch = th.stack(batch.rewards).type(FloatTensor).unsqueeze(dim=-1)
+    # done_batch = th.stack(batch.dones).type(FloatTensor).unsqueeze(dim=-1)
+
+    state_batch = th.from_numpy(np.array(batch.states)).type(FloatTensor)
+    action_batch = th.from_numpy(np.array(batch.actions)).type(FloatTensor)
+    next_states_batch = th.from_numpy(np.array(batch.next_states)).type(FloatTensor)
+    reward_batch = th.from_numpy(np.array(batch.rewards)).type(FloatTensor).unsqueeze(dim=-1)
+    done_batch = th.from_numpy(np.array(batch.dones)).type(FloatTensor).unsqueeze(dim=-1)
 
     c_optimizer.zero_grad()
     current_q = critic(state_batch, action_batch)
@@ -138,11 +146,11 @@ class Trainer:
                                            is_look=False)
 
     def add_experience(self, obs_n, act_n, next_obs_n, rew_n, done_n):
-        obs_n = th.from_numpy(obs_n).type(FloatTensor)
-        act_n = th.from_numpy(act_n).type(FloatTensor)
-        next_obs_n = th.from_numpy(next_obs_n).type(FloatTensor)
-        rew_n = th.from_numpy(rew_n).type(FloatTensor)
-        done_n = th.from_numpy(done_n).type(FloatTensor)
+        # obs_n = th.from_numpy(obs_n).type(FloatTensor)
+        # act_n = th.from_numpy(act_n).type(FloatTensor)
+        # next_obs_n = th.from_numpy(next_obs_n).type(FloatTensor)
+        # rew_n = th.from_numpy(rew_n).type(FloatTensor)
+        # done_n = th.from_numpy(done_n).type(FloatTensor)
         self.memory.push(obs_n, act_n, next_obs_n, rew_n, done_n)
 
     def act(self, obs_n, var_decay=False):
@@ -161,6 +169,7 @@ class Trainer:
 
     def update(self):
         self.step += 1
+        start = time.time()
         num_threads = self.n_agents
         update_target = (self.step % 100 == 0)
 
@@ -194,6 +203,7 @@ class Trainer:
                          value={'agent_{}'.format(i + 1): v for i, v in enumerate(np.mean(self.a_losses, axis=0))},
                          episode=self.step)
             self.c_losses, self.a_losses = [], []
+        print(self.step, time.time()-start)
 
     def load_model(self, load_path=None):
         if load_path is None:

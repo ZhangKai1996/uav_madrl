@@ -11,7 +11,7 @@ def add_ADI(i, image, views, n, width, height, limit, span=5):
     飞行姿态指示仪（Attitude Director Indicator, ADI）
     """
     # horizontal
-    height_h = height // 4
+    height_h = int(height // 4)
     img_h = np.ones((height_h, width, 3), dtype=np.uint8) * 255
     center_x_h, center_y_h = width // 2, height_h // 2
     img_h = cv2.rectangle(img_h,
@@ -23,7 +23,7 @@ def add_ADI(i, image, views, n, width, height, limit, span=5):
                      (center_x_h, height_h),
                      (0, 255, 255), 1)
     # vertical
-    width_v = height // 4
+    width_v = int(height // 4)
     img_v = np.ones((height, width_v, 3), dtype=np.uint8) * 255
     center_x_v, center_y_v = width_v // 2, height // 2
     img_v = cv2.rectangle(img_v,

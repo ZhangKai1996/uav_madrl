@@ -132,11 +132,8 @@ class AirSimDroneEnv(AirSimEnv):
         info, dones = [], []
         for i in range(self.n):
             uav_name = 'Drone{}'.format(i + 1)
-            state = client.getMultirotorState(vehicle_name=uav_name)
-            collision = client.simGetCollisionInfo(vehicle_name=uav_name).has_collided
-            pos = state.kinematics_estimated.position
-            info.append([pos, collision])
-            dones.append(int(collision))
+            info.append(client.getMultirotorState(vehicle_name=uav_name).kinematics_estimated.position)
+            dones.append(int(client.simGetCollisionInfo(vehicle_name=uav_name).has_collided))
 
         # Agents are rewarded based on minimum agent distance to each landmark, penalized for collisions
         rewards = []
@@ -144,7 +141,7 @@ class AirSimDroneEnv(AirSimEnv):
             rew = 0
             for f_point in fixed_points:
                 dists = []
-                for [pos, *_] in info:
+                for pos in info:
                     x_square = math.pow(pos.x_val - f_point[0], 2)
                     y_square = math.pow(pos.y_val - f_point[1], 2)
                     z_square = math.pow(pos.z_val - f_point[2], 2)
@@ -152,8 +149,8 @@ class AirSimDroneEnv(AirSimEnv):
                     dists.append(dist)
                 rew -= min(dists) * 0.01
 
-            if info[i][1]:
-                rew -= 100
+            if dones[i] == 1:
+                rew -= 10
             rewards.append(rew)
         return np.array(rewards), np.array(dones)
 

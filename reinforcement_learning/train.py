@@ -74,19 +74,22 @@ def train(args):
     if args.load_dir is not None:
         trainer.load_model(load_path=args.load_dir)
 
-    thread = None
     # Start iterations
     print('Iteration start...')
-    step, episode, reward_record = 0, 0, []
+    step, episode, reward_step, reward_epi = 0, 0, [], []
     start = time.time()
+    thread = None
     while True:
         episode += 1
         obs_n = env.reset()
+        reward_per_epi = []
         for i in range(args.max_episode_len):
             act_n = trainer.act(obs_n, step >= args.learning_start)
             next_obs_n, rew_n, done_n, _ = env.step(act_n)
+
             step += 1
-            reward_record.append(rew_n)
+            reward_step.append(rew_n)
+            reward_per_epi.append(rew_n)
             trainer.add_experience(obs_n, act_n, next_obs_n, rew_n, done_n)
             obs_n = next_obs_n
 
@@ -107,15 +110,25 @@ def train(args):
                     thread = None
 
             if sum(done_n) > 0:
+                reward_epi.append(np.sum(reward_per_epi, axis=0))
                 break
+
         if episode % args.save_rate == 0:
             trainer.save_model()
-            rew_dict = {'agent_{}'.format(i + 1): v for i, v in enumerate(np.mean(reward_record, axis=0))}
-            rew_dict['total'] = np.sum(reward_record, axis=1).mean()
-            trainer.scalars("Reward", rew_dict, episode)
+
+            # Mean reward for each agent (step)
+            rew_dict = {'agent_{}'.format(i + 1): v for i, v in enumerate(np.mean(reward_step, axis=0))}
+            rew_dict['total'] = np.sum(reward_step, axis=1).mean()
+            trainer.scalars("Reward_step", rew_dict, episode)
+
+            # Mean reward for each agent (episode)
+            rew_dict = {'agent_{}'.format(i + 1): v for i, v in enumerate(np.mean(reward_epi, axis=0))}
+            rew_dict['total'] = np.sum(reward_epi, axis=1).mean()
+            trainer.scalars("Reward_epi", rew_dict, episode)
+
             trainer.scalars("Param", {'var': trainer.var}, episode)
-            reward_record = []
-            print('Episode:', episode, rew_dict)
+            reward_step, reward_epi = [], []
+
         if episode >= args.num_episodes:
             break
     # End environment
@@ -132,7 +145,7 @@ if __name__ == '__main__':
     parser.add_argument("--max-episode-len", type=int, default=100, help="maximum episode length")
     parser.add_argument("--num-episodes", type=int, default=60000, help="number of episodes")
     parser.add_argument('--memory-length', default=int(1e6), type=int, help='number of experience replay pool')
-    parser.add_argument("--learning-start", type=int, default=1000, help="start updating after this number of step")
+    parser.add_argument("--learning-start", type=int, default=50, help="start updating after this number of step")
     parser.add_argument("--good-policy", type=str, default="algo", help="policy for good agents")
     parser.add_argument("--adv-policy", type=str, default="algo", help="policy of adversaries")
     # Core training parameters

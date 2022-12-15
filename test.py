@@ -1,17 +1,17 @@
-import numpy as np
-import math
-import matplotlib.pyplot as plt
-
-beta_list = [2.0, 1.0, 0.1]
-x = np.linspace(0.0, 100.0, 100)
-for beta in beta_list:
-    y = [-math.log(beta * (v+1e-8)) for v in x]
-    # y = [math.exp(beta * v) for v in x]
-    plt.plot(x, y, label="{:>+4.2f}".format(beta))
-
-
-plt.legend()
-plt.show()
+# import numpy as np
+# import math
+# import matplotlib.pyplot as plt
+#
+# beta_list = [2.0, 1.0, 0.1]
+# x = np.linspace(0.0, 100.0, 100)
+# for beta in beta_list:
+#     y = [-math.log(beta * (v+1e-8)) for v in x]
+#     # y = [math.exp(beta * v) for v in x]
+#     plt.plot(x, y, label="{:>+4.2f}".format(beta))
+#
+#
+# plt.legend()
+# plt.show()
 
 
 # import threading
@@ -34,3 +34,12 @@ plt.show()
 # t.start()
 # t.join()
 # print('thread %s ended.' % threading.current_thread().name)
+
+import torch as th
+import numpy as np
+
+a = np.random.randn(32, 3, 10)
+b = np.random.randn(32, 3, 10)
+
+c = (a, b, )
+print(th.from_numpy(np.array(c)).shape)
